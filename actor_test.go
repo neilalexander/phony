@@ -5,18 +5,20 @@ import (
 	"unsafe"
 )
 
+type Example struct{}
+
 func TestInboxSize(t *testing.T) {
-	var a Inbox
-	var q queueElem
+	var a Inbox[Example]
+	var q queueElem[Example]
 	t.Logf("Inbox size: %d, message size: %d", unsafe.Sizeof(a), unsafe.Sizeof(q))
 }
 
 func TestBlock(t *testing.T) {
-	var a Inbox
+	var a Inbox[Example]
 	var results []int
 	for idx := 0; idx < 1024; idx++ {
 		n := idx // Because idx gets mutated in place
-		Block(&a, func() {
+		a.Block(func(_ *Example) {
 			results = append(results, n)
 		})
 	}
@@ -28,17 +30,17 @@ func TestBlock(t *testing.T) {
 }
 
 func TestAct(t *testing.T) {
-	var a Inbox
+	var a Inbox[Example]
 	var results []int
-	Block(&a, func() {
+	a.Block(func(_ *Example) {
 		for idx := 0; idx < 1024; idx++ {
 			n := idx // Because idx gets mutated in place
-			a.Act(&a, func() {
+			a.Act(&a, func(_ *Example) {
 				results = append(results, n)
 			})
 		}
 	})
-	Block(&a, func() {})
+	a.Block(func(_ *Example) {})
 	for idx, n := range results {
 		if n != idx {
 			t.Errorf("value %d != index %d", n, idx)
@@ -52,7 +54,7 @@ func TestPanicAct(t *testing.T) {
 			t.Errorf("The code did not panic")
 		}
 	}()
-	var a Inbox
+	var a Inbox[Example]
 	a.Act(nil, nil)
 }
 
@@ -62,7 +64,8 @@ func TestPanicBlockActor(t *testing.T) {
 			t.Errorf("The code did not panic")
 		}
 	}()
-	Block(nil, nil)
+	var a Actor[Example]
+	a.Block(nil)
 }
 
 func TestPanicBlockAction(t *testing.T) {
@@ -71,16 +74,16 @@ func TestPanicBlockAction(t *testing.T) {
 			t.Errorf("The code did not panic")
 		}
 	}()
-	var a Inbox
-	Block(&a, nil)
+	var a Inbox[Example]
+	a.Block(nil)
 }
 
 func BenchmarkLoopActor(b *testing.B) {
-	var a Inbox
+	var a Inbox[Example]
 	done := make(chan struct{})
 	idx := 0
-	var f func()
-	f = func() {
+	var f func(_ *Example)
+	f = func(_ *Example) {
 		if idx < b.N {
 			idx++
 			a.Act(nil, f)
@@ -116,17 +119,17 @@ func BenchmarkLoopChannel(b *testing.B) {
 }
 
 func BenchmarkSendActor(b *testing.B) {
-	var a, s Inbox
+	var a, s Inbox[Example]
 	done := make(chan struct{})
 	idx := 0
-	var f func()
-	f = func() {
+	var f func(_ *Example)
+	f = func(_ *Example) {
 		if idx < b.N {
 			idx++
-			a.Act(&s, func() {})
+			a.Act(&s, func(_ *Example) {})
 			s.Act(nil, f)
 		} else {
-			a.Act(&s, func() { close(done) })
+			a.Act(&s, func(_ *Example) { close(done) })
 		}
 	}
 	s.Act(nil, f)
@@ -151,25 +154,25 @@ func BenchmarkSendChannel(b *testing.B) {
 }
 
 func BenchmarkRequestResponseActor(b *testing.B) {
-	var pinger, ponger Inbox
+	var pinger, ponger Inbox[Example]
 	done := make(chan struct{})
 	idx := 0
-	var ping, pong func()
-	ping = func() {
+	var ping, pong func(_ *Example)
+	ping = func(_ *Example) {
 		if idx < b.N {
 			idx++
 			ponger.Act(&pinger, pong)
 			pinger.Act(nil, ping) // loop asynchronously
 		} else {
-			ponger.Act(&pinger, func() {
-				pinger.Act(nil, func() {
+			ponger.Act(&pinger, func(_ *Example) {
+				pinger.Act(nil, func(_ *Example) {
 					close(done)
 				})
 			})
 		}
 	}
-	pong = func() {
-		pinger.Act(nil, func() {}) // send a response without backpressure
+	pong = func(_ *Example) {
+		pinger.Act(nil, func(_ *Example) {}) // send a response without backpressure
 	}
 	pinger.Act(nil, ping)
 	<-done
@@ -213,8 +216,8 @@ func BenchmarkRequestResponseChannel(b *testing.B) {
 }
 
 func BenchmarkBlock(b *testing.B) {
-	var a Inbox
+	var a Inbox[Example]
 	for i := 0; i < b.N; i++ {
-		Block(&a, func() {})
+		a.Block(func(_ *Example) {})
 	}
 }
